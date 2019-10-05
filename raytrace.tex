@@ -1,0 +1,378 @@
+\documentclass{article}
+\usepackage{xfp}
+\usepackage{binaryimage}
+
+\makeatletter
+
+% structure enum
+\def\sphere{sphere}
+\def\novalue{novalue}
+\def\ray{ray}
+
+% surface enum
+\def\Lambertian{lambertian}
+\def\Metal{metal}
+\def\Dielectric{dielectric}
+
+
+% main function #1: objects #2: camera
+\newcount\c@x
+\newcount\c@y
+\newtoks\t@img
+
+\def\createimage#1#2{%
+    \c@y=\pictHeight\relax
+    \t@img={}%
+    \createimage@y#1#2%
+    \xdef\imageresult{\the\t@img}%
+}
+\def\createimage@y#1#2{%
+    \c@x=0\relax
+    \createimage@x#1#2%
+    \advance\c@y-1\relax
+    \ifnum\c@y>0
+        \expandafter\createimage@y
+    \else
+        \expandafter\createimage@end
+    \fi#1#2}
+\def\createimage@x#1#2{%
+    \createimage@do#1#2%
+    \advance\c@x1\relax
+    \ifnum\c@x<\pictWidth\relax
+        \expandafter\createimage@x
+    \else
+        \expandafter\createimage@end
+    \fi#1#2}
+\def\createimage@end#1#2{}
+\def\createimage@do#1#2{{%
+    \immediate\write16{(\the\c@x,\the\c@y)}%
+    \edef\@c@x{\fpeval{(\c@x + rand() - 0.5) / \pictWidth}}%
+    \edef\@c@y{\fpeval{(\c@y + rand() - 0.5) / \pictHeight}}%
+    \@calc@ray@trace#1#2(\@c@x,\@c@y)\@tmp@rgb@i%
+    \edef\@c@x{\fpeval{(\c@x + rand() - 0.5) / \pictWidth}}%
+    \edef\@c@y{\fpeval{(\c@y + rand() - 0.5) / \pictHeight}}%
+    \@calc@ray@trace#1#2(\@c@x,\@c@y)\@tmp@rgb@ii%
+    \edef\@c@x{\fpeval{(\c@x + rand() - 0.5) / \pictWidth}}%
+    \edef\@c@y{\fpeval{(\c@y + rand() - 0.5) / \pictHeight}}%
+    \@calc@ray@trace#1#2(\@c@x,\@c@y)\@tmp@rgb@iii%
+    \edef\@tmp@rgb{\fpeval{(\@tmp@rgb@i + \@tmp@rgb@ii + \@tmp@rgb@iii)/3}}%
+    \expandafter\@convert@rgb\@tmp@rgb\@tmp@rgb
+    \global\t@img=\expandafter\expandafter\expandafter{\expandafter\the\expandafter\t@img\@tmp@rgb}%
+    \gdef\@@tmp@color{}%
+}}
+
+\def\@calc@ray@trace#1#2(#3,#4)#5{%
+    \getray#2(#3,#4)\@@ray
+    {\@@calc{0}\@@ray#1#5}%
+}
+\def\@convert@rgb(#1,#2,#3){%
+    \edef\@@tmp@rgb{\fpeval{(floor(sqrt(#1) * 255),floor(sqrt(#2) * 255),floor(sqrt(#3) * 255))}}%
+    \expandafter\@@convert@rgb\@@tmp@rgb
+}
+\def\@@convert@rgb(#1,#2,#3)#4{%
+    \edef#4{\@to@hex{#1}\@to@hex{#2}\@to@hex{#3}}%
+}
+%% #1:depth, #2: ray, #3: objects, #4: cs
+\newif\if@hit
+\def\@@calc#1#2#3#4{%
+    \def\@@hit{}%
+    \def\@@hit@max{500}%
+    \@hitfalse
+    \expandafter\expandafter\expandafter\@@calc@hit\expandafter#2#3\novalue%
+    \if@hit
+        \expandafter\@@calc@reflect
+    \else
+        \expandafter\@@calc@sky
+    \fi
+    \@@hit\@@hit@max{#1}#2#3#4%
+}
+% #1: origin
+\def\@@calc@hit(#1)(#2)#3{\csname @@calc@hit@#3\endcsname(#1)(#2)}
+\def\@@calc@hit@novalue(#1)(#2){}
+% #1: origin, #2: direction, #3: radius, #4: center, #5: surface
+\def\@@calc@hit@sphere(#1)(#2)#3(#4)#5{%
+    \edef\@@oc{\fpeval{(#1) - (#4)}}%
+    \@@dot@vector(#2)(#2)\@@a
+    \expandafter\@@dot@vector\@@oc(#2)\@@b
+    \edef\@@b{\fpeval{2 * \@@b}}%
+    \expandafter\expandafter\expandafter\@@dot@vector\expandafter\@@oc\@@oc\@@c
+    \edef\@@c{\fpeval{\@@c - #3 * #3}}%
+    \edef\@@D{\fpeval{\@@b * \@@b - 4 * \@@a * \@@c}}%
+    \ifnum\fpeval{\@@D > 0}=1
+        \edef\@@t@tmp{\fpeval{(- 1 * \@@b - sqrt(\@@D)) / (2 * \@@a)}}%
+        \ifnum\fpeval{\@@t@tmp < \@@hit@max}\fpeval{\@@t@tmp > 0.001}=11
+            \let\@@hit@max\@@t@tmp
+            \def\@@hit{{#3}(#4){#5}}%
+            \@hittrue
+        \fi
+        \edef\@@t@tmp{\fpeval{(- 1 * \@@b + sqrt(\@@D)) / (2 * \@@a)}}%
+        \ifnum\fpeval{\@@t@tmp < \@@hit@max}\fpeval{\@@t@tmp > 0.001}=11
+            \let\@@hit@max\@@t@tmp
+            \def\@@hit{#3(#4){#5}}%
+            \@hittrue
+        \fi
+    \fi
+    \@@calc@hit(#1)(#2)%
+}
+
+\def\@@calc@sky#1#2#3#4#5#6{\expandafter\@@calc@sky@#4#6}
+\def\@@calc@sky@(#1,#2,#3)(#4,#5,#6)#7{%
+    \@@unit@vector(#4,#5,#6)\@@def@vector\@@ud
+    \def\@@t{\fpeval{0.5 * \expandafter\@@get@y@vector\@@ud + 1}}%
+    \xdef#7{(\fpeval{1 - \@@t * 0.5},\fpeval{1 - \@@t * 0.3},1)}%
+}
+\def\@@calc@reflect#1#2#3#4#5#6{\expandafter\@@calc@reflect@\expandafter{#1}#2{#3}#4#5#6}
+\def\@@calc@reflect@#1#2#3#4#5#6{\expandafter\@@calc@reflect@@\expandafter{#2}{#1}{#3}#4#5#6}
+\def\@@calc@reflect@@#1#2#3#4#5#6{\@@calc@reflect@@@{#3}#4#5#2{#1}#6}
+%% #1:depth, #2: ray, #3: objects,  #4: radius, #5: center, #6: surface, #7: t, #8: cs
+\def\@@calc@reflect@@@#1#2#3#4(#5)#6#7#8{%
+    \def\@@calc@reflect@scatter@check{0}%
+    \def\@@calc@reflect@scatter@current@color{}%
+    \def\@@calc@reflect@scatter@next@ray{}%
+    \@@calc@reflect@inner#2{#4}(#5)#6{#7}%
+    \ifnum\fpeval{#1 < 50}\@@calc@reflect@scatter@check=11
+        \expandafter\@@calc@reflect@cont
+    \else
+        \expandafter\@@calc@reflect@fin
+    \fi{#1}#3#8%
+}
+\def\@@calc@reflect@cont#1#2#3{%
+    \expandafter\def\expandafter\@@tmp@vector\expandafter{\@@calc@reflect@scatter@next@ray}%
+    \expandafter\def\expandafter\@@tmp@current@color\expandafter{\@@calc@reflect@scatter@current@color}%
+    {\expandafter\@@calc\expandafter{\the\numexpr#1+1}\@@tmp@vector#2\@@tmp@color}%
+    \expandafter\expandafter\expandafter\@@mul@per@verctor\expandafter\@@tmp@color\@@tmp@current@color\@@def@vector#3%
+    \global\let#3#3%
+}
+\def\@@calc@reflect@fin#1#2#3{\gdef#3{(0,0,0)}}
+% #1: ray, #2 radius, #3: center, #4 sufrace type
+\def\@@calc@reflect@inner#1#2(#3)#4{\csname @@calc@reflect@inner@#4\endcsname#1{#2}(#3)}
+% #1: ray, #2 radius, #3: center, #4 sufrace color, #5: t
+\def\@@calc@reflect@inner@lambertian#1#2(#3)(#4)#5{%
+    \def\@@calc@reflect@scatter@check{1}%
+    \expandafter\@@calc@get@ray@point#1{#5}\@@tmp@p
+    \edef\@@tmp@n{\fpeval{(\@@tmp@p-(#3))/#2}}%
+    \@@calc@rand\@@tmp@tt
+    \edef\@@tmp@tt{\fpeval{\@@tmp@n + \@@tmp@tt}}%
+    \expandafter\@@unit@vector\@@tmp@tt\@@def@vector\@@tmp@tt % normalize for minimize numbers
+    \def\@@calc@reflect@scatter@current@color{(#4)}%
+    \edef\@@calc@reflect@scatter@next@ray{\@@tmp@p\@@tmp@tt}%
+}
+% #1: ray, #2 radius, #3: center, #4 sufrace color, #5: t
+\def\@@calc@reflect@inner@metal#1#2(#3)(#4)#5{%
+    \expandafter\@@calc@get@ray@point#1{#5}\@@tmp@p
+    \edef\@@tmp@n{\fpeval{(\@@tmp@p-(#3))/#2}}%
+    \expandafter\@@get@direction#1\@@unit@vector\@@def@vector\@@tmp@reflect
+    \expandafter\expandafter\expandafter\@@calc@reflect@inner@metal@reflect\expandafter\@@tmp@reflect\@@tmp@n\@@tmp@reflect
+    \def\@@calc@reflect@scatter@current@color{(#4)}%
+    \edef\@@calc@reflect@scatter@next@ray{\@@tmp@p\@@tmp@reflect}%
+    \expandafter\expandafter\expandafter\@@dot@vector\expandafter\@@tmp@reflect\@@tmp@n\@@tmp@dot
+    \edef\@@calc@reflect@scatter@check{\fpeval{\@@tmp@dot > 0}}%    
+}
+% #1: ray, #2 radius, #3: center, #4: n, #5: t
+\def\@@calc@reflect@inner@dielectric#1#2(#3)#4#5{%
+    \expandafter\@@calc@get@ray@point#1{#5}\@@tmp@p
+    \edef\@@tmp@n{\fpeval{(\@@tmp@p-(#3))/#2}}%
+    \expandafter\@@get@direction#1\@@def@vector\@@tmp@direction
+    \expandafter\expandafter\expandafter\@@dot@vector\expandafter\@@tmp@direction\@@tmp@n\@@tmp@dot
+    \expandafter\@@get@direction#1\@@length@vector\@@tmp@length
+    \ifnum\fpeval{\@@tmp@dot > 0}=1
+        \edef\@@outward{\fpeval{-1 * \@@tmp@n}}%
+        \def\@@ni@over@nt{#4}%
+        \edef\@@cosine{\fpeval{#4 * \@@tmp@dot / \@@tmp@length}}%
+    \else
+        \let\@@outward\@@tmp@n%
+        \edef\@@ni@over@nt{\fpeval{1 / #4}}%
+        \edef\@@cosine{\fpeval{-1 * \@@tmp@dot / \@@tmp@length}}%
+    \fi
+    \def\@@calc@reflect@scatter@current@color{(1,1,1)}%
+    \@refractfalse
+    \def\@@tmp@refract{}%
+    \edef\@@tmp@direction{\fpeval{-1 * \@@tmp@direction}}%
+    \@@calc@reflect@inner@dielectric@refract\@@tmp@direction\@@outward\@@ni@over@nt
+    \if@refract
+        \edef\@@tmp@prob{\fpeval{((1 - #4) * (1 - #4)) / ((1 + #4) * (1 + #4))}}%
+        \edef\@@tmp@prob{\fpeval{\@@tmp@prob + (1 - \@@tmp@prob) * (1 - \@@cosine) * (1 - \@@cosine) * (1 - \@@cosine) * (1 - \@@cosine) * (1 - \@@cosine)}}%
+    \else
+        \def\@@tmp@prob{1}%
+    \fi
+    \ifnum\fpeval{\@@tmp@prob > rand()}=1
+        \expandafter\@@get@direction#1\@@unit@vector\@@def@vector\@@tmp@reflect
+        \expandafter\expandafter\expandafter\@@calc@reflect@inner@metal@reflect\expandafter\@@tmp@reflect\@@tmp@n\@@tmp@reflect
+        \edef\@@calc@reflect@scatter@next@ray{\@@tmp@p\@@tmp@reflect}%
+    \else
+        \edef\@@calc@reflect@scatter@next@ray{\@@tmp@p\@@tmp@refract}%
+    \fi
+    \def\@@calc@reflect@scatter@check{1}%    
+}
+\newif\if@refract
+\def\@@calc@reflect@inner@dielectric@refract#1#2#3{%
+    \expandafter\@@unit@vector#1\@@def@vector\@@tmp@uv
+    \expandafter\expandafter\expandafter\@@dot@vector\expandafter\@@tmp@uv#2\@@tmp@dt
+    \edef\@@tmp@D{\fpeval{1 - #3 * #3 * (1 - \@@tmp@dt * \@@tmp@dt)}}%
+    \ifnum\fpeval{\@@tmp@D > 0}=1
+        \@refracttrue
+        \edef\@@tmp@refract{\fpeval{-1 * #3 * (\@@tmp@uv - #2 * \@@tmp@dt) - #2 * sqrt(\@@tmp@D)}}%
+        \expandafter\@@unit@vector\@@tmp@refract\@@def@vector\@@tmp@refract % minimize vector for minimize numbers
+    \else
+        \@refractfalse
+    \fi
+}
+
+\def\@@calc@rand#1{%
+    \edef\@@rand@i{\fpeval{2 * rand() - 1}}%
+    \edef\@@rand@ii{\fpeval{2 * rand() - 1}}%
+    \edef\@@rand@iii{\fpeval{2 * rand() - 1}}%
+    \ifnum\fpeval{\@@rand@i * \@@rand@i + \@@rand@ii * \@@rand@ii + \@@rand@iii * \@@rand@iii < 1}=1
+        \edef#1{(\@@rand@i,\@@rand@ii,\@@rand@iii)}%
+    \else
+        \expandafter\@@calc@rand\expandafter#1%
+    \fi
+}
+\def\@@calc@get@ray@point(#1)(#2)#3#4{\edef#4{\fpeval{(#1)+#3*(#2)}}}
+\def\@@calc@reflect@inner@metal@reflect(#1)(#2)#3{%
+    \@@dot@vector(#1)(#2)#3%
+    \edef#3{\fpeval{(#1) - 2 * #3 * (#2)}}%
+}
+
+
+
+% create camera to #1, (#2, #3, #4): lookfrom, #5vfov[rad], #6: focus_dist
+% I fix lookat=(0,0,0), vup=(0,1,0)
+\def\makecamera#1(#2,#3,#4)#5#6{%
+    \edef\@half@height{\fpeval{tan(#5 / 2)}}%
+    %\edef\@half@width{\fpeval{4 * \@half@height / 3}}% fixed aspect 4:3
+    \let\@half@width\@half@height
+    \@@id@vector(#2,#3,#4)\@@unit@vector\@@def@vector\@@w % lookat = (0,0,0)
+    \def\@@cont@fst{\@@cross@vector(0,1,0)}%
+    \expandafter\@@cont@fst\@@w\@@unit@vector\@@def@vector\@@u
+    \expandafter\expandafter\expandafter\@@cross@vector\expandafter\@@w\@@u\@@def@vector\@@v
+    \edef\@@x@mult{\fpeval{\@half@width * #6}}%
+    \edef\@@y@mult{\fpeval{\@half@height * #6}}%
+    %% calc llc
+    \edef\@@llc@ii{\fpeval{\@@x@mult * \@@u}}%
+    \edef\@@llc@iii{\fpeval{\@@y@mult * \@@v}}%
+    %% final
+    \xdef#1{(#2,#3,#4)\fpeval{(#2,#3,#4) - \@@llc@ii - \@@llc@iii - #6 * \@@w}\fpeval{2 * \@@llc@ii}\fpeval{2 * \@@llc@iii}}%
+}
+% get ray from camera #1: camera
+\def\getray#1{\expandafter\@getray#1}%
+%% #1: lookfrom, #2: llc, #3:h, #4:v, (#5, %6): (px, py), #7: \cs
+\def\@getray(#1)(#2)(#3)(#4)(#5,#6)#7{%
+    % ray(lookfrom, llc + px * h + py * v - (lookfrom))
+    \@@getray(#1)(#2)(#3)(#4)(#5,#6)\@@get@x\@@@x
+    \@@getray(#1)(#2)(#3)(#4)(#5,#6)\@@get@y\@@@y
+    \@@getray(#1)(#2)(#3)(#4)(#5,#6)\@@get@z\@@@z
+    \edef#7{(#1)(\@@@x,\@@@y,\@@@z)}%
+}
+%% #1: lookfrom, #2: llc, #3:h, #4:v, (#5, %6): (px, py), #7: direction, #8: \cs
+\def\@@getray(#1)(#2)(#3)(#4)(#5,#6)#7#8{%
+    % llc + px * h + py * v - (lookfrom)
+    \edef#8{\fpeval{#7#2| + #5 * #7#3| + #6 * #7#4| - #7#1|}}%
+}
+% get vector from ray
+\def\getrayvec#1{\expandafter\@getrayvec#1}
+\def\@getrayvec(#1)(#2)#3#4{%
+    \@@getrayvec(#1)(#2){#3}\@@get@x\@@@x
+    \@@getrayvec(#1)(#2){#3}\@@get@y\@@@y
+    \@@getrayvec(#1)(#2){#3}\@@get@z\@@@z
+    \edef#4{(\@@@x,\@@@y,\@@@z)}%
+}
+\def\@@getrayvec(#1)(#2)#3#4#5{%
+    \edef#5{\fpeval{#4#1| + #3 * #4#2|}}%
+}
+
+%% vector calc
+%%% get each value
+\def\@@get@x#1,#2,#3|{#1}
+\def\@@get@y#1,#2,#3|{#2}
+\def\@@get@z#1,#2,#3|{#3}
+\def\@@get@x@vector(#1,#2,#3){#1}
+\def\@@get@y@vector(#1,#2,#3){#2}
+\def\@@get@z@vector(#1,#2,#3){#3}
+
+%% join two continuations
+\def\@@join@vector@cont#1#2#3{%
+    #1\@@def@vector\@@tmp@i
+    #2\@@def@vector\@@tmp@ii
+    \expandafter\expandafter\expandafter#3\expandafter\@@tmp@i\@@ymp@ii
+}
+%% id
+\def\@@id@vector(#1)#2{#2(#1)}
+%% terminal continuation: define
+\def\@@def@vector(#1)#2{\def#2{(#1)}}
+%% calc unit vector
+\def\@@unit@vector(#1,#2,#3)#4{%
+    \edef\@ll{\fpeval{sqrt(#1 * #1 + #2 * #2 + #3 * #3)}}%
+    \edef\@@tmp{(\fpeval{#1 / \@ll},\fpeval{#2 / \@ll},\fpeval{#3 / \@ll})}%
+    \expandafter#4\@@tmp
+}
+%% add
+\def\@@add@vector(#1,#2,#3)(#4,#5,#6)#7{%
+    \edef\@@tmp{(\fpeval{#1 + #4},\fpeval{#2 + #5},\fpeval{#3 + #6})}%
+    \expandafter#7\@@tmp
+}
+%% sub
+\def\@@sub@vector(#1,#2,#3)(#4,#5,#6)#7{%
+    \edef\@@tmp{(\fpeval{#1 - #4},\fpeval{#2 - #5},\fpeval{#3 - #6})}%
+    \expandafter#7\@@tmp
+}
+%% mult
+\def\@@mult@vector(#1,#2,#3)#4#5{%
+    \edef\@@tmp{(\fpeval{#1 * #4},\fpeval{#2 * #4},\fpeval{#3 * #4})}%
+    \expandafter#5\@@tmp
+}
+%% cross
+\def\@@cross@vector(#1,#2,#3)(#4,#5,#6)#7{%
+\edef\@@tmp{(\fpeval{#2 * #6 - #3 * #5},\fpeval{#3 * #4 - #1 * #6},\fpeval{#1 * #5 - #2 * #4})}%
+\expandafter#7\@@tmp
+}
+%% dot (terminal continuation)
+\def\@@dot@vector(#1,#2,#3)(#4,#5,#6)#7{\edef#7{\fpeval{#1 * #4 + #2 * #5 + #3 * #6}}}
+%% mutiply per part
+\def\@@mul@per@verctor(#1,#2,#3)(#4,#5,#6)#7{%
+    \edef\@@tmp{(\fpeval{#1 * #4},\fpeval{#2 * #5},\fpeval{#3 * #6})}%
+    \expandafter#7\@@tmp
+}
+%% get direction from ray
+\def\@@get@direction(#1)(#2)#3{#3(#2)}
+%% get length (terminal continuation)
+\def\@@length@vector(#1,#2,#3)#4{\edef#4{\fpeval{sqrt(#1 * #1 + #2 * #2 + #3 * #3)}}}
+
+
+% to hex...
+\def\@to@hex#1{%
+    \ifcase#1 00\or 01\or 02\or 03\or 04\or 05\or 06\or 07\or 08\or 09\or 0a\or 0b\or 0c\or 0d\or 0e\or 0f\or
+              10\or 11\or 12\or 13\or 14\or 15\or 16\or 17\or 18\or 19\or 1a\or 1b\or 1c\or 1d\or 1e\or 1f\or
+              20\or 21\or 22\or 23\or 24\or 25\or 26\or 27\or 28\or 29\or 2a\or 2b\or 2c\or 2d\or 2e\or 2f\or
+              30\or 31\or 32\or 33\or 34\or 35\or 36\or 37\or 38\or 39\or 3a\or 3b\or 3c\or 3d\or 3e\or 3f\or
+              40\or 41\or 42\or 43\or 44\or 45\or 46\or 47\or 48\or 49\or 4a\or 4b\or 4c\or 4d\or 4e\or 4f\or
+              50\or 51\or 52\or 53\or 54\or 55\or 56\or 57\or 58\or 59\or 5a\or 5b\or 5c\or 5d\or 5e\or 5f\or
+              60\or 61\or 62\or 63\or 64\or 65\or 66\or 67\or 68\or 69\or 6a\or 6b\or 6c\or 6d\or 6e\or 6f\or
+              70\or 71\or 72\or 73\or 74\or 75\or 76\or 77\or 78\or 79\or 7a\or 7b\or 7c\or 7d\or 7e\or 7f\or
+              80\or 81\or 82\or 83\or 84\or 85\or 86\or 87\or 88\or 89\or 8a\or 8b\or 8c\or 8d\or 8e\or 8f\or
+              90\or 91\or 92\or 93\or 94\or 95\or 96\or 97\or 98\or 99\or 9a\or 9b\or 9c\or 9d\or 9e\or 9f\or
+              a0\or a1\or a2\or a3\or a4\or a5\or a6\or a7\or a8\or a9\or aa\or ab\or ac\or ad\or ae\or af\or
+              b0\or b1\or b2\or b3\or b4\or b5\or b6\or b7\or b8\or b9\or ba\or bb\or bc\or bd\or be\or bf\or
+              c0\or c1\or c2\or c3\or c4\or c5\or c6\or c7\or c8\or c9\or ca\or cb\or cc\or cd\or ce\or cf\or
+              d0\or d1\or d2\or d3\or d4\or d5\or d6\or d7\or d8\or d9\or da\or db\or dc\or dd\or de\or df\or
+              e0\or e1\or e2\or e3\or e4\or e5\or e6\or e7\or e8\or e9\or ea\or eb\or ec\or ed\or ee\or ef\or
+              f0\or f1\or f2\or f3\or f4\or f5\or f6\or f7\or f8\or f9\or fa\or fb\or fc\or fd\or fe\or ff\else #1\fi}
+\makeatother
+
+%% must be 1:1
+\newcommand{\pictWidth}{200}
+\newcommand{\pictHeight}{200}
+
+\newcommand{\spheres}{% \sphere{radius}(position){surface}
+    \sphere{1.5}(3,1.5,0){\Lambertian(1,0,0)}%
+    \sphere{0.8}(5.3,0.8,0){\Lambertian(0,0,1)}%
+    \sphere{2.0}(0.3,2.0,3.3){\Metal(0.7,0.7,0.7)}%
+    \sphere{0.6}(6.3,0.6,1.4){\Dielectric{1.5}}%
+    \sphere{10000}(0,-10000,0){\Lambertian(0.5,1,0.5)}% titama
+}
+\makecamera\view(12,2.08,2){0.75}{10.0}
+
+\begin{document}
+\createimage\spheres\view
+img\includebinary[size={\pictWidth}x{\pictHeight},option={width=6cm, clip}]\imageresult\endbinary
+\end{document}

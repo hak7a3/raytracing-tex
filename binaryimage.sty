@@ -1,0 +1,58 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{binaryimage}
+\RequirePackage{keyval}
+\RequirePackage{graphicx}
+
+\def\@bin@base@tmp@file{binaryimage}
+\def\@bin@exp@tmp@file{.eps}
+\newcount\@bin@index@tmp@file
+
+%% create filename (e.g. binaryimage42.eps))
+\def\@bin@create@filename#1{%
+  \edef#1{%
+    \jobname-\@bin@base@tmp@file
+    \the\@bin@index@tmp@file
+    \@bin@exp@tmp@file}%
+  \advance\@bin@index@tmp@file by 1}
+
+\newwrite\@bin@tmp@file
+
+%% write eps file
+% setting options
+\define@key{binaryimage}{dpi}[72]{\def\@bin@dpi{#1}} % TODO
+\define@key{binaryimage}{size}{\@bin@getsize(#1)}
+\define@key{binaryimage}{option}[]{\def\@bin@option{#1}}
+
+\def\@bin@getsize(#1x#2){\def\@bin@width##1{#1}\def\@bin@height##1{#2}}
+
+% ussage \includebinary[option]HEXDATA\endbinary
+\def\includebinary[#1]{%
+  \def\@bin@option{}%
+  \setkeys{binaryimage}{#1}%
+  \@bin@create@filename\@bin@name
+  \immediate\openout
+    \@bin@tmp@file=\@bin@name\relax
+  \begingroup
+    \lccode`+=`\%%
+    \lowercase{\def~{+}}%
+    \immediate\write\@bin@tmp@file{%
+      ~!PS-Adobe-3.0 EPSF-3.0^^J%
+      ~~BoundingBox: 0 0 \@bin@width{} \@bin@height{}^^J%
+      /DeviceRGB setcolorspace^^J%
+      \@bin@width{} \@bin@height{} scale^^J%
+      <<^^J%
+        /ImageType 1^^J%
+        /Width \@bin@width{}^^J%
+        /Height \@bin@height{}^^J%
+        /BitsPerComponent 8^^J%
+        /Decode [0 1 0 1 0 1]^^J%
+        /ImageMatrix [\@bin@width{} 0 0 \@bin@height{} neg 0 \@bin@height{}]^^J%
+        /DataSource currentfile /ASCIIHexDecode filter^^J>>}%
+    \edef\@bin@data{\ifnum`}=0\fi
+       image^^J^^J}
+\def\endbinary{%
+  \ifnum`{=0\fi}% end of \edef
+  \immediate\write\@bin@tmp@file\expandafter{\@bin@data}%
+  \endgroup
+  \immediate\closeout\@bin@tmp@file
+  \expandafter\includegraphics\expandafter[\@bin@option]{\@bin@name}}
