@@ -44,22 +44,36 @@
         \expandafter\createimage@end
     \fi#1#2}
 \def\createimage@end#1#2{}
+\newcount\@ray@num
 \def\createimage@do#1#2{{%
     \immediate\write16{(\the\c@x,\the\c@y)}%
-    \edef\@c@x{\fpeval{(\c@x + rand() - 0.5) / \pictWidth}}%
-    \edef\@c@y{\fpeval{(\c@y + rand() - 0.5) / \pictHeight}}%
-    \@calc@ray@trace#1#2(\@c@x,\@c@y)\@tmp@rgb@i%
-    \edef\@c@x{\fpeval{(\c@x + rand() - 0.5) / \pictWidth}}%
-    \edef\@c@y{\fpeval{(\c@y + rand() - 0.5) / \pictHeight}}%
-    \@calc@ray@trace#1#2(\@c@x,\@c@y)\@tmp@rgb@ii%
-    \edef\@c@x{\fpeval{(\c@x + rand() - 0.5) / \pictWidth}}%
-    \edef\@c@y{\fpeval{(\c@y + rand() - 0.5) / \pictHeight}}%
-    \@calc@ray@trace#1#2(\@c@x,\@c@y)\@tmp@rgb@iii%
-    \edef\@tmp@rgb{\fpeval{(\@tmp@rgb@i + \@tmp@rgb@ii + \@tmp@rgb@iii)/3}}%
+    \@ray@num=\rayNum
+    \def\@tmp@rgb{(0,0,0)}%
+    \createimage@do@#1#2%
+    \edef\@tmp@rgb{\fpeval{\@tmp@rgb/\rayNum}}%
     \expandafter\@convert@rgb\@tmp@rgb\@tmp@rgb
     \global\t@img=\expandafter\expandafter\expandafter{\expandafter\the\expandafter\t@img\@tmp@rgb}%
     \gdef\@@tmp@color{}%
 }}
+\def\createimage@do@#1#2{%
+    \ifnum\@ray@num=0
+        \expandafter\createimage@do@end
+    \else
+        \expandafter\createimage@do@@
+    \fi#1#2%
+}
+\def\createimage@do@end#1#2{}
+\def\createimage@do@@#1#2{
+    \advance\@ray@num-1
+    \createimage@do@part#1#2\@tmp@rgb@tmp
+    \edef\@tmp@rgb{\fpeval{\@tmp@rgb + \@tmp@rgb@tmp}}%
+    \createimage@do@#1#2%
+}
+\def\createimage@do@part#1#2#3{%
+    \edef\@c@x{\fpeval{(\c@x + rand() - 0.5) / \pictWidth}}%
+    \edef\@c@y{\fpeval{(\c@y + rand() - 0.5) / \pictHeight}}%
+    \@calc@ray@trace#1#2(\@c@x,\@c@y)#3%
+}
 
 \def\@calc@ray@trace#1#2(#3,#4)#5{%
     \getray#2(#3,#4)\@@ray
@@ -76,7 +90,7 @@
 \newif\if@hit
 \def\@@calc#1#2#3#4{%
     \def\@@hit{}%
-    \def\@@hit@max{500}%
+    \def\@@hit@max{100}%
     \@hitfalse
     \expandafter\expandafter\expandafter\@@calc@hit\expandafter#2#3\novalue%
     \if@hit
@@ -362,6 +376,7 @@
 %% must be 1:1
 \newcommand{\pictWidth}{200}
 \newcommand{\pictHeight}{200}
+\newcommand{\rayNum}{3}
 
 \newcommand{\spheres}{% \sphere{radius}(position){surface}
     \sphere{1.5}(3,1.5,0){\Lambertian(1,0,0)}%
